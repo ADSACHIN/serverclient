@@ -2,8 +2,11 @@ import { useState, useEffect, useRef } from 'react'
 import io from 'socket.io-client'
 
 const CHUNK_SIZE = 64 * 1024
-const socket = io(import.meta.env.VITE_BACKEND_URL)
-
+const socket = io(import.meta.env.VITE_BACKEND_URL, {
+  transports: ["websocket"],
+  reconnection: true,
+  timeout: 20000
+});
 async function sha256(buffer) {
   const hashBuffer = await crypto.subtle.digest('SHA-256', buffer)
   return Array.from(new Uint8Array(hashBuffer))
@@ -472,50 +475,165 @@ export default function App() {
   const messagesEndRef = useRef(null)
 
   useEffect(() => {
-    socket.on('chat message', msg => {
-      setMessages(prev => [...prev, { ...msg, type: 'text', ts: new Date() }])
-    })
-    socket.on('file:start', ({ transferId, fileName, fileType, totalChunks, hash, senderName }) => {
-      incomingFiles.current[transferId] = { fileName, fileType, totalChunks, hash, senderName, chunks: [] }
-    })
-    socket.on('file:chunk', async ({ transferId, index, data }) => {
-      const file = incomingFiles.current[transferId]
-      if (!file) return
-      file.chunks[index] = data
-      const received = file.chunks.filter(Boolean).length
-      setProgress({ name: file.fileName, pct: Math.round((received / file.totalChunks) * 100) })
 
-      if (received === file.totalChunks) {
-        const binaryChunks = file.chunks.map(b64 => {
-          const binary = atob(b64)
-          return Uint8Array.from(binary, c => c.charCodeAt(0))
-        })
-        const totalLen = binaryChunks.reduce((s, c) => s + c.length, 0)
-        const assembled = new Uint8Array(totalLen)
-        let offset = 0
-        for (const chunk of binaryChunks) { assembled.set(chunk, offset); offset += chunk.length }
+  socket.on("connect", () => {
+    console.log("CONNECTED:", socket.id);
+  });
 
-        const receivedHash = await sha256(assembled.buffer)
-        const verified = receivedHash === file.hash
-        const url = URL.createObjectURL(new Blob([assembled], { type: file.fileType }))
+  socket.on("chat message", (msg) => {
+    setMessages(prev => [
+      ...prev,
+      { ...msg, type: "text", ts: new Date() }
+    ]);
+  });
 
-        setMessages(prev => [...prev, {
-          type: 'file',
-          name: file.senderName || 'Anonymous',
+  /*
+    FILE START
+  */
+
+  socket.on("file:start", ({
+    transferId,
+    fileName,
+    fileType,
+    totalChunks,
+    hash,
+    senderName
+  }) => {
+
+    console.log("FILE START RECEIVED");
+
+    incomingFiles.current[transferId] = {
+      fileName,
+      fileType,
+      totalChunks,
+      hash,
+      senderName,
+      chunks: []
+    };
+
+  });
+
+  /*
+    FILE CHUNK
+  */
+
+  socket.on("file:chunk", async ({
+    transferId,
+    index,
+    data
+  }) => {
+
+    console.log("CHUNK RECEIVED:", index);
+
+    const file = incomingFiles.current[transferId];
+
+    if (!file) {
+      console.log("NO FILE CONTEXT");
+      return;
+    }
+
+    file.chunks[index] = data;
+
+    const received =
+      file.chunks.filter(Boolean).length;
+
+    console.log(
+      "Received:",
+      received,
+      "Total:",
+      file.totalChunks
+    );
+
+    setProgress({
+      name: file.fileName,
+      pct: Math.round(
+        (received / file.totalChunks) * 100
+      )
+    });
+
+    /*
+      IMPORTANT FIX
+    */
+
+    if (received >= file.totalChunks) {
+
+      console.log("ALL CHUNKS RECEIVED");
+
+      const binaryChunks =
+        file.chunks.map(b64 => {
+          const binary = atob(b64);
+          return Uint8Array.from(
+            binary,
+            c => c.charCodeAt(0)
+          );
+        });
+
+      const totalLen =
+        binaryChunks.reduce(
+          (s, c) => s + c.length,
+          0
+        );
+
+      const assembled =
+        new Uint8Array(totalLen);
+
+      let offset = 0;
+
+      for (const chunk of binaryChunks) {
+        assembled.set(chunk, offset);
+        offset += chunk.length;
+      }
+
+      const receivedHash =
+        await sha256(
+          assembled.buffer
+        );
+
+      const verified =
+        receivedHash === file.hash;
+
+      const url =
+        URL.createObjectURL(
+          new Blob(
+            [assembled],
+            { type: file.fileType }
+          )
+        );
+
+      setMessages(prev => [
+        ...prev,
+        {
+          type: "file",
+          name: file.senderName || "Anonymous",
           fileName: file.fileName,
           fileType: file.fileType,
           fileSize: totalLen,
-          url, verified,
+          url,
+          verified,
           senderHash: file.hash,
           receivedHash,
           ts: new Date()
-        }])
-        delete incomingFiles.current[transferId]
-        setProgress(null)
-      }
-    })
-    return () => { socket.off('chat message'); socket.off('file:start'); socket.off('file:chunk') }
-  }, [])
+        }
+      ]);
+
+      delete incomingFiles.current[transferId];
+
+      setProgress(null);
+
+    }
+
+  });
+
+  return () => {
+
+    socket.off("connect");
+    socket.off("chat message");
+    socket.off("file:start");
+    socket.off("file:chunk");
+
+  };
+
+}, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
