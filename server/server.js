@@ -24,10 +24,12 @@ const io = new Server(server, {
   transports: ["websocket", "polling"],
 
   // Allow larger transfers (100 MB safe)
-  maxHttpBufferSize: 100 * 1024 * 1024,
+  maxHttpBufferSize: 20 * 1024 * 1024,
 
   pingTimeout: 60000,
-  pingInterval: 25000
+  pingInterval: 25000,
+  allowEIO3: true
+
 });
 
 /*
@@ -42,17 +44,40 @@ io.on("connection", (socket) => {
   /*
     Debug: log every event
   */
+
   socket.onAny((event) => {
     console.log("Event:", event);
   });
 
   /*
-    File transfer START
-    Relay metadata to all other clients
+    Memory monitor (debug)
   */
-  socket.on("file:start", (meta) => {
-    socket.broadcast.emit("file:start", meta);
+
+  const memInterval = setInterval(() => {
+    const used = process.memoryUsage();
+
+    console.log(
+      "Memory MB:",
+      Math.round(used.heapUsed / 1024 / 1024)
+    );
+
+  }, 10000);
+
+  /*
+    Cleanup when client disconnects
+  */
+
+  socket.on("disconnect", (reason) => {
+
+    console.log("Disconnected:", socket.id);
+    console.log("Reason:", reason);
+    console.log("Total clients:", io.engine.clientsCount);
+
+    clearInterval(memInterval);
+
   });
+
+});
 
   /*
     File transfer CHUNK
