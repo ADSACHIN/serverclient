@@ -11,7 +11,8 @@ const server = http.createServer(app);
   Socket.IO configuration
   - CORS enabled
   - WebSocket + polling support
-  - 1 MB max message size (safe for chunk transfer)
+  - Increased buffer size for file transfer
+  - Stable ping settings for cloud hosting
 */
 
 const io = new Server(server, {
@@ -19,8 +20,14 @@ const io = new Server(server, {
     origin: "*",
     methods: ["GET", "POST"]
   },
+
   transports: ["websocket", "polling"],
-  maxHttpBufferSize: 1e6 // 1 MB
+
+  // Allow larger transfers (100 MB safe)
+  maxHttpBufferSize: 100 * 1024 * 1024,
+
+  pingTimeout: 60000,
+  pingInterval: 25000
 });
 
 /*
@@ -33,36 +40,41 @@ io.on("connection", (socket) => {
   console.log("Total clients:", io.engine.clientsCount);
 
   /*
-    File chunk relay
-    Receive → Broadcast → Discard
+    Debug: log every event
   */
-
-  socket.on("file-chunk", (data) => {
-    socket.broadcast.emit("file-chunk", data);
+  socket.onAny((event) => {
+    console.log("Event:", event);
   });
 
   /*
-    Transfer metadata relay
+    File transfer START
+    Relay metadata to all other clients
   */
-
-  socket.on("file-meta", (meta) => {
-    socket.broadcast.emit("file-meta", meta);
+  socket.on("file:start", (meta) => {
+    socket.broadcast.emit("file:start", meta);
   });
 
   /*
-    Transfer completion relay
+    File transfer CHUNK
+    Relay chunk to all other clients
   */
+  socket.on("file:chunk", (chunk) => {
+    socket.broadcast.emit("file:chunk", chunk);
+  });
 
-  socket.on("file-complete", () => {
-    socket.broadcast.emit("file-complete");
+  /*
+    Chat message relay
+  */
+  socket.on("chat message", (msg) => {
+    socket.broadcast.emit("chat message", msg);
   });
 
   /*
     Client disconnect handler
   */
-
-  socket.on("disconnect", () => {
+  socket.on("disconnect", (reason) => {
     console.log("Disconnected:", socket.id);
+    console.log("Reason:", reason);
     console.log("Total clients:", io.engine.clientsCount);
   });
 
