@@ -103,7 +103,7 @@ io.on("connection", (socket) => {
     console.log("Total clients:", io.engine.clientsCount);
   });
 
-});
+
 
 /*
   Health check endpoint
