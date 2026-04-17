@@ -105,6 +105,8 @@ io.on("connection", (socket) => {
   NEW: HTTP Upload Endpoint
 */
 
+const crypto = require("crypto");
+
 app.post("/upload", upload.single("file"), (req, res) => {
 
   try {
@@ -121,15 +123,26 @@ app.post("/upload", upload.single("file"), (req, res) => {
     const transferId =
       Date.now().toString();
 
+    const buffer = req.file.buffer;
+
+    /*
+      Compute SHA-256 hash
+    */
+
+    const hash = crypto
+      .createHash("sha256")
+      .update(buffer)
+      .digest("hex");
+
     const base64Data =
-      req.file.buffer.toString("base64");
+      buffer.toString("base64");
 
     io.emit("file:start", {
       transferId,
       fileName: req.file.originalname,
       fileType: req.file.mimetype,
       totalChunks: 1,
-      hash: "",
+      hash: hash,
       senderName: "HTTP Sender"
     });
 
