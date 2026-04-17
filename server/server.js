@@ -3,9 +3,14 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
+const multer = require("multer");
 
 const app = express();
 const server = http.createServer(app);
+
+/*
+  Socket.IO configuration
+*/
 
 const io = new Server(server, {
   cors: {
@@ -23,6 +28,17 @@ const io = new Server(server, {
 });
 
 /*
+  Multer setup (for HTTP upload)
+*/
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 100 * 1024 * 1024 // 100 MB
+  }
+});
+
+/*
   Client connection handler
 */
 
@@ -31,17 +47,9 @@ io.on("connection", (socket) => {
   console.log("Connected:", socket.id);
   console.log("Total clients:", io.engine.clientsCount);
 
-  /*
-    Debug: log every event
-  */
-
   socket.onAny((event) => {
     console.log("Event:", event);
   });
-
-  /*
-    Memory monitor
-  */
 
   const memInterval = setInterval(() => {
     const used = process.memoryUsage();
@@ -94,6 +102,62 @@ io.on("connection", (socket) => {
 });
 
 /*
+  NEW: HTTP Upload Endpoint
+*/
+
+app.post("/upload", upload.single("file"), (req, res) => {
+
+  try {
+
+    if (!req.file) {
+      return res.status(400).send("No file received");
+    }
+
+    console.log(
+      "HTTP upload received:",
+      req.file.originalname
+    );
+
+    const transferId =
+      Date.now().toString();
+
+    const base64Data =
+      req.file.buffer.toString("base64");
+
+    io.emit("file:start", {
+      transferId,
+      fileName: req.file.originalname,
+      fileType: req.file.mimetype,
+      totalChunks: 1,
+      hash: "",
+      senderName: "HTTP Sender"
+    });
+
+    io.emit("file:chunk", {
+      transferId,
+      index: 0,
+      data: base64Data
+    });
+
+    io.emit("file:complete", {
+      transferId
+    });
+
+    res.send("Upload successful");
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).send(
+      "Upload failed"
+    );
+
+  }
+
+});
+
+/*
   Health check endpoint
 */
 
@@ -105,7 +169,8 @@ app.get("/", (req, res) => {
   Start server
 */
 
-const PORT = process.env.PORT || 3000;
+const PORT =
+  process.env.PORT || 3000;
 
 server.listen(PORT, () => {
   console.log("Server on port", PORT);
